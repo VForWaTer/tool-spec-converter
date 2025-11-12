@@ -2,7 +2,7 @@
 
 import { writable, type Writable } from 'svelte/store';
 import type { AnalysisState, CheckResult, Check } from './types.js';
-import { validateRepoExists, checkFileExists, getFileContent, type GitHubRepoInfo } from './github-api.js';
+import { validateRepoExists, checkFileExists, getFileContent, getLatestTag, getDockerfileContent, extractDockerfileCmd, checkGhcrImage, type GitHubRepoInfo } from './github-api.js';
 import { validateToolSpec, type ToolSpecValidationResult } from './tool-spec-validator.js';
 import { parseCitationCff, compareLicenses, type CitationCffValidationResult } from './citation-cff-parser.js';
 import { createUnifiedMetadata, type UnifiedSoftwareMetadata } from './unified-metadata.js';
@@ -18,6 +18,8 @@ export const analysisStore: Writable<AnalysisState> = writable({
 	progress: 0,
 	toolYaml: null,
 	citationCff: null,
+	dockerfileCmd: undefined,
+	repositoryVersion: undefined,
 	metadata: null,
 	warnings: [],
 	errors: [],
@@ -75,6 +77,62 @@ const checks: Check[] = [
 					error: error instanceof Error ? error.message : 'Unknown error',
 					duration: Date.now() - startTime,
 					isRequired: true
+				};
+			}
+		}
+	},
+	{
+		id: 'repository-tag',
+		name: 'Get repository version tag',
+		description: 'Fetching latest repository tag for version',
+		dependencies: ['repo-exists'],
+		isRequired: false,
+		executor: async (state) => {
+			const startTime = Date.now();
+			console.log('🏷️ Fetching repository tags...');
+			
+			try {
+				if (!state.repoInfo) {
+					throw new Error('Repository info not available');
+				}
+				
+				const latestTag = await getLatestTag(state.repoInfo);
+				const version = latestTag || 'latest';
+				
+				console.log(`✅ Repository version: ${version}`);
+				
+				// Update state with version
+				analysisStore.update(s => ({
+					...s,
+					repositoryVersion: version
+				}));
+				
+				return {
+					id: 'repository-tag',
+					name: 'Get repository version tag',
+					description: 'Fetching latest repository tag for version',
+					status: 'completed',
+					data: { version, tag: latestTag },
+					duration: Date.now() - startTime,
+					isRequired: false
+				};
+			} catch (error) {
+				console.error('❌ Error fetching repository tags:', error);
+				// Not critical, use 'latest' as fallback
+				analysisStore.update(s => ({
+					...s,
+					repositoryVersion: 'latest'
+				}));
+				
+				return {
+					id: 'repository-tag',
+					name: 'Get repository version tag',
+					description: 'Fetching latest repository tag for version',
+					status: 'completed',
+					data: { version: 'latest' },
+					warning: error instanceof Error ? error.message : 'Unknown error, using "latest"',
+					duration: Date.now() - startTime,
+					isRequired: false
 				};
 			}
 		}
@@ -208,6 +266,86 @@ const checks: Check[] = [
 					error: error instanceof Error ? error.message : 'Unknown error',
 					duration: Date.now() - startTime,
 					isRequired: true
+				};
+			}
+		}
+	},
+	{
+		id: 'dockerfile-cmd',
+		name: 'Extract command from Dockerfile',
+		description: 'Fetching Dockerfile and extracting CMD instruction',
+		dependencies: ['tool-yaml-valid'],
+		isRequired: false,
+		executor: async (state) => {
+			const startTime = Date.now();
+			console.log('🐳 Fetching Dockerfile...');
+			
+			try {
+				if (!state.repoInfo) {
+					throw new Error('Repository info not available');
+				}
+				
+				const dockerfileContent = await getDockerfileContent(state.repoInfo);
+				
+				if (!dockerfileContent) {
+					console.log('⚠️ Dockerfile not found');
+					return {
+						id: 'dockerfile-cmd',
+						name: 'Extract command from Dockerfile',
+						description: 'Fetching Dockerfile and extracting CMD instruction',
+						status: 'failed',
+						warning: 'Dockerfile not found - command will need to be provided manually',
+						duration: Date.now() - startTime,
+						isRequired: false
+					};
+				}
+				
+				console.log('✅ Dockerfile found, extracting CMD...');
+				const cmdInfo = extractDockerfileCmd(dockerfileContent);
+				
+				if (cmdInfo && cmdInfo.command) {
+					console.log(`✅ Command extracted: ${cmdInfo.command}`);
+					if (cmdInfo.interpreter) {
+						console.log(`✅ Interpreter detected: ${cmdInfo.interpreter}`);
+					}
+					
+					// Update state with command
+					analysisStore.update(s => ({
+						...s,
+						dockerfileCmd: cmdInfo.command
+					}));
+					
+					return {
+						id: 'dockerfile-cmd',
+						name: 'Extract command from Dockerfile',
+						description: 'Fetching Dockerfile and extracting CMD instruction',
+						status: 'completed',
+						data: cmdInfo,
+						duration: Date.now() - startTime,
+						isRequired: false
+					};
+				} else {
+					console.log('⚠️ CMD instruction not found in Dockerfile');
+					return {
+						id: 'dockerfile-cmd',
+						name: 'Extract command from Dockerfile',
+						description: 'Fetching Dockerfile and extracting CMD instruction',
+						status: 'failed',
+						warning: 'CMD instruction not found in Dockerfile - command will need to be provided manually',
+						duration: Date.now() - startTime,
+						isRequired: false
+					};
+				}
+			} catch (error) {
+				console.error('❌ Error fetching Dockerfile:', error);
+				return {
+					id: 'dockerfile-cmd',
+					name: 'Extract command from Dockerfile',
+					description: 'Fetching Dockerfile and extracting CMD instruction',
+					status: 'failed',
+					warning: error instanceof Error ? error.message : 'Unknown error - command will need to be provided manually',
+					duration: Date.now() - startTime,
+					isRequired: false
 				};
 			}
 		}
@@ -427,7 +565,9 @@ const checks: Check[] = [
 					state.repoInfo,
 					state.toolYaml,
 					state.citationCff,
-					licenseInfo
+					licenseInfo,
+					state.dockerfileCmd,
+					state.repositoryVersion
 				);
 				
 				// Test export with default format (CodeMeta)
@@ -492,6 +632,8 @@ export async function startAnalysis(repoUrl: string) {
 		progress: 0,
 		toolYaml: null,
 		citationCff: null,
+		dockerfileCmd: undefined,
+		repositoryVersion: undefined,
 		metadata: null,
 		warnings: [],
 		errors: [],
@@ -619,6 +761,8 @@ export function resetAnalysis() {
 		progress: 0,
 		toolYaml: null,
 		citationCff: null,
+		dockerfileCmd: undefined,
+		repositoryVersion: undefined,
 		metadata: null,
 		warnings: [],
 		errors: [],
