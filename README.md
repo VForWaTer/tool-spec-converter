@@ -1,5 +1,7 @@
 # Tool-Spec Converter
 
+[![DOI](https://zenodo.org/badge/1067255841.svg)](https://doi.org/10.5281/zenodo.17588401)
+
 A web application for analyzing tool-spec compliant GitHub repositories and converting them to various software metadata formats.
 
 ## Features
