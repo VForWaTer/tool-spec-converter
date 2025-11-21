@@ -88,6 +88,21 @@ export interface GalaxyExportConfig {
 	profile?: string; // default "24.0"
 }
 
+export interface CwlOutput {
+	name: string;
+	type: 'File' | 'Directory' | 'string' | 'int' | 'float' | 'boolean' | string;
+	glob: string;
+	label?: string;
+	doc?: string;
+}
+
+export interface CwlExportConfig {
+	cwlVersion: 'v1.1' | 'v1.2';
+	outputs: CwlOutput[];
+	baseCommand?: string;
+	container?: string;
+}
+
 export interface UnifiedSoftwareMetadata {
 	// Basic Information
 	name: string;

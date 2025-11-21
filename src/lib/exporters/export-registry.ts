@@ -2,6 +2,7 @@
 
 import { CodeMetaExporter } from './codemeta-exporter.js';
 import { GalaxyExporter } from './galaxy-exporter.js';
+import { CwlExporter } from './cwl-exporter.js';
 import type { ExportFormat, MetadataExporter } from './base-exporter.js';
 
 // Export format registry
@@ -19,6 +20,13 @@ const exportFormats: ExportFormat[] = [
 		description: 'Galaxy tool.xml format for tool integration',
 		icon: '🌌',
 		exporter: new GalaxyExporter()
+	},
+	{
+		id: 'cwl',
+		name: 'CWL',
+		description: 'Common Workflow Language CommandLineTool specification for workflow portability',
+		icon: '⚙️',
+		exporter: new CwlExporter()
 	}
 	// Future formats will be added here:
 	// {

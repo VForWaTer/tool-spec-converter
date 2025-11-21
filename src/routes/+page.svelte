@@ -3,7 +3,7 @@
 	import { analysisStore, startAnalysis, cancelAnalysis, resetAnalysis } from '$lib/analysis-engine.js';
 	import type { AnalysisState } from '$lib/types.js';
 	import { getExportFormats, getDefaultExportFormat } from '$lib/exporters/export-registry.js';
-	import type { UnifiedSoftwareMetadata, GalaxyOutput, GalaxyExportConfig } from '$lib/unified-metadata.js';
+	import type { UnifiedSoftwareMetadata, GalaxyOutput, GalaxyExportConfig, CwlOutput, CwlExportConfig } from '$lib/unified-metadata.js';
 	
 	let searchValue = $state('');
 	let isSearching = $state(false);
@@ -37,6 +37,12 @@
 	let galaxyContainer: string = $state('');
 	let galaxyContainerVersion: string = $state('');
 	
+	// CWL-specific state
+	let cwlOutputs: CwlOutput[] = $state([]);
+	let cwlVersion: 'v1.1' | 'v1.2' = $state('v1.2');
+	let cwlBaseCommand: string = $state('');
+	let cwlContainer: string = $state('');
+	
 	// Subscribe to analysis store
 	analysisStore.subscribe(state => {
 		analysisState = state;
@@ -57,6 +63,17 @@
 			// Initialize container from repository if not set
 			if (!galaxyContainer && state.metadata?.repository?.fullName) {
 				galaxyContainer = `ghcr.io/${state.metadata.repository.fullName}:latest`;
+			}
+			
+			// Initialize CWL config from metadata
+			if (state.metadata?.galaxyConfig) {
+				cwlContainer = state.metadata.galaxyConfig.container || '';
+				cwlBaseCommand = state.metadata.galaxyConfig.command || '';
+			}
+			
+			// Initialize container from repository if not set
+			if (!cwlContainer && state.metadata?.repository?.fullName) {
+				cwlContainer = `ghcr.io/${state.metadata.repository.fullName}:latest`;
 			}
 			
 			// Auto-collapse analysis after 2 seconds
@@ -137,6 +154,17 @@
 			if ('download' in format.exporter) {
 				(format.exporter as any).download(analysisState.metadata, undefined, galaxyConfig);
 			}
+		} else if (selectedExportFormat === 'cwl') {
+			const cwlConfig: CwlExportConfig = {
+				cwlVersion: cwlVersion,
+				outputs: cwlOutputs,
+				baseCommand: cwlBaseCommand || undefined,
+				container: cwlContainer || analysisState.metadata.galaxyConfig?.container || undefined
+			};
+			
+			if ('download' in format.exporter) {
+				(format.exporter as any).download(analysisState.metadata, undefined, cwlConfig);
+			}
 		} else {
 			if ('download' in format.exporter) {
 				(format.exporter as any).download(analysisState.metadata);
@@ -163,6 +191,18 @@
 			return (format.exporter as any).export(analysisState.metadata, galaxyConfig);
 		}
 		
+		// For CWL export, we need to pass the config
+		if (selectedExportFormat === 'cwl') {
+			const cwlConfig: CwlExportConfig = {
+				cwlVersion: cwlVersion,
+				outputs: cwlOutputs,
+				baseCommand: cwlBaseCommand || undefined,
+				container: cwlContainer || analysisState.metadata.galaxyConfig?.container || undefined
+			};
+			
+			return (format.exporter as any).export(analysisState.metadata, cwlConfig);
+		}
+		
 		return format.exporter.export(analysisState.metadata);
 	}
 	
@@ -184,6 +224,25 @@
 	const galaxyDatatypes = [
 		'data', 'txt', 'tabular', 'csv', 'json', 'xml', 'fasta', 'fastqsanger', 
 		'gff', 'gtf', 'bed', 'vcf', 'sam', 'bam', 'bai', 'bigwig', 'bigbed'
+	];
+	
+	function addCwlOutput() {
+		cwlOutputs = [...cwlOutputs, { name: '', type: 'File', glob: '*.out', label: '', doc: '' }];
+	}
+	
+	function removeCwlOutput(index: number) {
+		cwlOutputs = cwlOutputs.filter((_, i) => i !== index);
+	}
+	
+	function updateCwlOutput(index: number, field: keyof CwlOutput, value: string) {
+		cwlOutputs = cwlOutputs.map((output, i) => 
+			i === index ? { ...output, [field]: value } : output
+		);
+	}
+	
+	// Common CWL output types for dropdown
+	const cwlOutputTypes = [
+		'File', 'Directory', 'string', 'int', 'float', 'boolean'
 	];
 	
 	onMount(() => {
@@ -540,6 +599,154 @@
 											<input
 												type="text"
 												bind:value={galaxyContainer}
+												placeholder="ghcr.io/owner/repo:latest"
+												class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+											/>
+											<p class="text-xs text-gray-500 mt-1">
+												Docker container image location (e.g., ghcr.io/owner/repo:latest)
+											</p>
+										</div>
+									{/if}
+									
+									<!-- CWL-specific inputs -->
+									{#if selectedExportFormat === 'cwl'}
+										<!-- CWL Version Section -->
+										<div class="mb-6">
+											<label class="block text-sm font-medium text-gray-700 mb-2">
+												CWL Version *
+											</label>
+											<select
+												bind:value={cwlVersion}
+												class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+											>
+												<option value="v1.2">v1.2 (Latest)</option>
+												<option value="v1.1">v1.1</option>
+											</select>
+											<p class="text-xs text-gray-500 mt-1">
+												Select the CWL specification version to use
+											</p>
+										</div>
+										
+										<!-- Outputs Section -->
+										<div class="mb-6">
+											<div class="flex justify-between items-center mb-3">
+												<h4 class="font-medium text-gray-900">Outputs</h4>
+												<button
+													onclick={addCwlOutput}
+													class="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+												>
+													+ Add Output
+												</button>
+											</div>
+											
+											{#if cwlOutputs.length === 0}
+												<p class="text-sm text-gray-500 mb-3">No outputs defined. You can add them here or edit the downloaded CWL file manually.</p>
+											{/if}
+											
+											<div class="space-y-4">
+												{#each cwlOutputs as output, index}
+													<div class="border border-gray-200 rounded-lg p-4 bg-gray-50">
+														<div class="flex justify-between items-start mb-3">
+															<h5 class="font-medium text-gray-700">Output {index + 1}</h5>
+															<button
+																onclick={() => removeCwlOutput(index)}
+																class="text-red-600 hover:text-red-700 text-sm"
+															>
+																Remove
+															</button>
+														</div>
+														<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+															<div>
+																<label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+																<input
+																	type="text"
+																	value={output.name}
+																	oninput={(e) => updateCwlOutput(index, 'name', e.currentTarget.value)}
+																	placeholder="output_name"
+																	class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+																/>
+															</div>
+															<div>
+																<label class="block text-sm font-medium text-gray-700 mb-1">Type *</label>
+																<select
+																	value={output.type}
+																	onchange={(e) => updateCwlOutput(index, 'type', e.currentTarget.value)}
+																	class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+																>
+																	{#each cwlOutputTypes as outputType}
+																		<option value={outputType}>{outputType}</option>
+																	{/each}
+																</select>
+															</div>
+															<div>
+																<label class="block text-sm font-medium text-gray-700 mb-1">Glob Pattern *</label>
+																<input
+																	type="text"
+																	value={output.glob}
+																	oninput={(e) => updateCwlOutput(index, 'glob', e.currentTarget.value)}
+																	placeholder="*.out"
+																	class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+																/>
+															</div>
+															<div>
+																<label class="block text-sm font-medium text-gray-700 mb-1">Label</label>
+																<input
+																	type="text"
+																	value={output.label || ''}
+																	oninput={(e) => updateCwlOutput(index, 'label', e.currentTarget.value)}
+																	placeholder="Output Label"
+																	class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+																/>
+															</div>
+															<div class="md:col-span-2">
+																<label class="block text-sm font-medium text-gray-700 mb-1">Documentation</label>
+																<input
+																	type="text"
+																	value={output.doc || ''}
+																	oninput={(e) => updateCwlOutput(index, 'doc', e.currentTarget.value)}
+																	placeholder="Optional description"
+																	class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+																/>
+															</div>
+														</div>
+													</div>
+												{/each}
+											</div>
+											<p class="text-xs text-gray-500 mt-2">
+												Note: Glob patterns use shell-style wildcards (e.g., *.out, output.txt, results/*.json)
+											</p>
+										</div>
+										
+										<!-- Base Command Section -->
+										<div class="mb-6">
+											<label class="block text-sm font-medium text-gray-700 mb-2">
+												Base Command
+												{#if analysisState.metadata?.galaxyConfig?.command && !cwlBaseCommand}
+													<span class="text-gray-500 font-normal">(auto-generated from Docker, can be overridden)</span>
+												{/if}
+											</label>
+											<input
+												type="text"
+												bind:value={cwlBaseCommand}
+												placeholder="docker run --rm ..."
+												class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+											/>
+											<p class="text-xs text-gray-500 mt-1">
+												Docker command will be auto-generated if container is specified. You can override it here.
+											</p>
+										</div>
+										
+										<!-- Container Section -->
+										<div class="mb-6">
+											<label class="block text-sm font-medium text-gray-700 mb-2">
+												Container Image
+												{#if analysisState.metadata?.galaxyConfig?.container && !cwlContainer}
+													<span class="text-gray-500 font-normal">(auto-detected, can be overridden)</span>
+												{/if}
+											</label>
+											<input
+												type="text"
+												bind:value={cwlContainer}
 												placeholder="ghcr.io/owner/repo:latest"
 												class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
 											/>
