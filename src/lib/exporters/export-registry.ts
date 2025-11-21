@@ -2,6 +2,7 @@
 
 import { CodeMetaExporter } from './codemeta-exporter.js';
 import { GalaxyExporter } from './galaxy-exporter.js';
+import { SchemaOrgExporter } from './schema-org-exporter.js';
 import type { ExportFormat, MetadataExporter } from './base-exporter.js';
 
 // Export format registry
@@ -19,6 +20,13 @@ const exportFormats: ExportFormat[] = [
 		description: 'Galaxy tool.xml format for tool integration',
 		icon: '🌌',
 		exporter: new GalaxyExporter()
+	},
+	{
+		id: 'schema-org',
+		name: 'Schema.org',
+		description: 'JSON-LD metadata following Schema.org SoftwareApplication standard for web discoverability',
+		icon: '🌐',
+		exporter: new SchemaOrgExporter()
 	}
 	// Future formats will be added here:
 	// {
