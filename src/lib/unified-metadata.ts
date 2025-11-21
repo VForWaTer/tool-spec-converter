@@ -72,6 +72,22 @@ export interface CitationData {
 	abstract?: string;
 }
 
+export interface GalaxyOutput {
+	name: string;
+	label: string;
+	format: string; // Galaxy datatype
+	description?: string;
+}
+
+export interface GalaxyExportConfig {
+	command?: string;
+	interpreter?: string;
+	container?: string;
+	containerVersion?: string;
+	outputs: GalaxyOutput[];
+	profile?: string; // default "24.0"
+}
+
 export interface UnifiedSoftwareMetadata {
 	// Basic Information
 	name: string;
@@ -102,6 +118,9 @@ export interface UnifiedSoftwareMetadata {
 	generatedAt: string;
 	generator: string;
 	generatorVersion: string;
+	
+	// Galaxy-specific configuration (optional)
+	galaxyConfig?: GalaxyExportConfig;
 }
 
 /**
@@ -111,7 +130,9 @@ export function createUnifiedMetadata(
 	repoInfo: GitHubRepoInfo,
 	toolSpec: ToolSpec,
 	citationCff: CitationCff | null,
-	licenseInfo: any
+	licenseInfo: any,
+	dockerfileCmd?: string,
+	repositoryVersion?: string
 ): UnifiedSoftwareMetadata {
 	console.log('🔄 Creating unified metadata...');
 	console.log('📊 Input data:', {
@@ -132,8 +153,8 @@ export function createUnifiedMetadata(
 		...(repoInfo.language ? [repoInfo.language.toLowerCase()] : [])
 	].filter((keyword, index, array) => array.indexOf(keyword) === index); // Remove duplicates
 	
-	// Determine version (prefer citation, fallback to repository tags)
-	const version = citationCff?.version || 'latest';
+	// Determine version (prefer repository tag, then citation, fallback to 'latest')
+	const version = repositoryVersion || citationCff?.version || 'latest';
 	
 	// Determine license
 	const license: LicenseInfo = {
@@ -187,7 +208,16 @@ export function createUnifiedMetadata(
 		// Metadata
 		generatedAt: new Date().toISOString(),
 		generator: 'Tool-Spec Converter',
-		generatorVersion: '1.0.0'
+		generatorVersion: '1.0.0',
+		
+		// Galaxy-specific configuration (initialized with detected values, outputs empty for user to fill)
+		galaxyConfig: {
+			command: dockerfileCmd,
+			container: repoInfo ? `ghcr.io/${repoInfo.owner}/${repoInfo.name}:latest` : undefined,
+			containerVersion: repositoryVersion,
+			outputs: [],
+			profile: '24.0'
+		}
 	};
 	
 	console.log('✅ Unified metadata created:', {

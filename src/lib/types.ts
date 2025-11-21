@@ -33,6 +33,8 @@ export interface AnalysisState {
 	// Tool-spec data (collected during analysis)
 	toolYaml: any | null; // Will be typed properly once we see the structure
 	citationCff: any | null;
+	dockerfileCmd?: string;
+	repositoryVersion?: string;
 	
 	// Final results
 	metadata: any | null;

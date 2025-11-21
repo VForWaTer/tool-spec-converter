@@ -3,7 +3,7 @@
 	import { analysisStore, startAnalysis, cancelAnalysis, resetAnalysis } from '$lib/analysis-engine.js';
 	import type { AnalysisState } from '$lib/types.js';
 	import { getExportFormats, getDefaultExportFormat } from '$lib/exporters/export-registry.js';
-	import type { UnifiedSoftwareMetadata } from '$lib/unified-metadata.js';
+	import type { UnifiedSoftwareMetadata, GalaxyOutput, GalaxyExportConfig } from '$lib/unified-metadata.js';
 	
 	let searchValue = $state('');
 	let isSearching = $state(false);
@@ -31,6 +31,12 @@
 	let exportFormats = getExportFormats();
 	let autoCollapseTimer: number | null = null;
 	
+	// Galaxy-specific state
+	let galaxyOutputs: GalaxyOutput[] = $state([]);
+	let galaxyCommand: string = $state('');
+	let galaxyContainer: string = $state('');
+	let galaxyContainerVersion: string = $state('');
+	
 	// Subscribe to analysis store
 	analysisStore.subscribe(state => {
 		analysisState = state;
@@ -39,6 +45,19 @@
 		// Handle analysis completion
 		if (state.state === 'completed') {
 			showExportSection = true;
+			
+			// Initialize Galaxy config from metadata
+			if (state.metadata?.galaxyConfig) {
+				galaxyCommand = state.metadata.galaxyConfig.command || '';
+				galaxyContainer = state.metadata.galaxyConfig.container || '';
+				galaxyContainerVersion = state.metadata.galaxyConfig.containerVersion || '';
+				galaxyOutputs = state.metadata.galaxyConfig.outputs || [];
+			}
+			
+			// Initialize container from repository if not set
+			if (!galaxyContainer && state.metadata?.repository?.fullName) {
+				galaxyContainer = `ghcr.io/${state.metadata.repository.fullName}:latest`;
+			}
 			
 			// Auto-collapse analysis after 2 seconds
 			if (autoCollapseTimer) {
@@ -103,8 +122,25 @@
 		if (!analysisState.metadata) return;
 		
 		const format = exportFormats.find(f => f.id === selectedExportFormat);
-		if (format && 'download' in format.exporter) {
-			(format.exporter as any).download(analysisState.metadata);
+		if (!format) return;
+		
+		// For Galaxy export, we need to pass the config
+		if (selectedExportFormat === 'galaxy') {
+			const galaxyConfig: GalaxyExportConfig = {
+				command: galaxyCommand || analysisState.metadata.galaxyConfig?.command || '',
+				container: galaxyContainer || analysisState.metadata.galaxyConfig?.container,
+				containerVersion: galaxyContainerVersion || analysisState.metadata.galaxyConfig?.containerVersion,
+				outputs: galaxyOutputs,
+				profile: '24.0'
+			};
+			
+			if ('download' in format.exporter) {
+				(format.exporter as any).download(analysisState.metadata, undefined, galaxyConfig);
+			}
+		} else {
+			if ('download' in format.exporter) {
+				(format.exporter as any).download(analysisState.metadata);
+			}
 		}
 	}
 	
@@ -112,11 +148,43 @@
 		if (!analysisState.metadata) return '';
 		
 		const format = exportFormats.find(f => f.id === selectedExportFormat);
-		if (format) {
-			return format.exporter.export(analysisState.metadata);
+		if (!format) return '';
+		
+		// For Galaxy export, we need to pass the config
+		if (selectedExportFormat === 'galaxy') {
+			const galaxyConfig: GalaxyExportConfig = {
+				command: galaxyCommand || analysisState.metadata.galaxyConfig?.command || '',
+				container: galaxyContainer || analysisState.metadata.galaxyConfig?.container,
+				containerVersion: galaxyContainerVersion || analysisState.metadata.galaxyConfig?.containerVersion,
+				outputs: galaxyOutputs,
+				profile: '24.0'
+			};
+			
+			return (format.exporter as any).export(analysisState.metadata, galaxyConfig);
 		}
-		return '';
+		
+		return format.exporter.export(analysisState.metadata);
 	}
+	
+	function addGalaxyOutput() {
+		galaxyOutputs = [...galaxyOutputs, { name: '', label: '', format: 'data', description: '' }];
+	}
+	
+	function removeGalaxyOutput(index: number) {
+		galaxyOutputs = galaxyOutputs.filter((_, i) => i !== index);
+	}
+	
+	function updateGalaxyOutput(index: number, field: keyof GalaxyOutput, value: string) {
+		galaxyOutputs = galaxyOutputs.map((output, i) => 
+			i === index ? { ...output, [field]: value } : output
+		);
+	}
+	
+	// Common Galaxy datatypes for dropdown
+	const galaxyDatatypes = [
+		'data', 'txt', 'tabular', 'csv', 'json', 'xml', 'fasta', 'fastqsanger', 
+		'gff', 'gtf', 'bed', 'vcf', 'sam', 'bam', 'bai', 'bigwig', 'bigbed'
+	];
 	
 	onMount(() => {
 		searchInput?.focus();
@@ -232,7 +300,7 @@
 					</div>
 
 					<!-- Collapsible Content -->
-					<div class="transition-all duration-300 ease-in-out overflow-hidden {isAnalysisCollapsed ? 'max-h-0 opacity-0' : 'max-h-screen opacity-100'}">
+					<div class="transition-all duration-300 ease-in-out overflow-hidden {isAnalysisCollapsed ? 'max-h-0 opacity-0' : 'opacity-100'}">
 						<!-- Progress Bar -->
 						{#if analysisState.state === 'analyzing'}
 							<div class="mb-6">
@@ -359,6 +427,127 @@
 								<div class="mb-6">
 									<h3 class="text-lg font-medium text-gray-900 mb-2">{format.name}</h3>
 									<p class="text-gray-600 mb-4">{format.description}</p>
+									
+									<!-- Galaxy-specific inputs -->
+									{#if selectedExportFormat === 'galaxy'}
+										<!-- Outputs Section -->
+										<div class="mb-6">
+											<div class="flex justify-between items-center mb-3">
+												<h4 class="font-medium text-gray-900">Outputs</h4>
+												<button
+													onclick={addGalaxyOutput}
+													class="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+												>
+													+ Add Output
+												</button>
+											</div>
+											
+											{#if galaxyOutputs.length === 0}
+												<p class="text-sm text-gray-500 mb-3">No outputs defined. You can add them here or edit the downloaded XML manually.</p>
+											{/if}
+											
+											<div class="space-y-4">
+												{#each galaxyOutputs as output, index}
+													<div class="border border-gray-200 rounded-lg p-4 bg-gray-50">
+														<div class="flex justify-between items-start mb-3">
+															<h5 class="font-medium text-gray-700">Output {index + 1}</h5>
+															<button
+																onclick={() => removeGalaxyOutput(index)}
+																class="text-red-600 hover:text-red-700 text-sm"
+															>
+																Remove
+															</button>
+														</div>
+														<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+															<div>
+																<label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+																<input
+																	type="text"
+																	value={output.name}
+																	oninput={(e) => updateGalaxyOutput(index, 'name', e.currentTarget.value)}
+																	placeholder="output_name"
+																	class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+																/>
+															</div>
+															<div>
+																<label class="block text-sm font-medium text-gray-700 mb-1">Label *</label>
+																<input
+																	type="text"
+																	value={output.label}
+																	oninput={(e) => updateGalaxyOutput(index, 'label', e.currentTarget.value)}
+																	placeholder="Output Label"
+																	class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+																/>
+															</div>
+															<div>
+																<label class="block text-sm font-medium text-gray-700 mb-1">Format *</label>
+																<select
+																	value={output.format}
+																	onchange={(e) => updateGalaxyOutput(index, 'format', e.currentTarget.value)}
+																	class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+																>
+																	{#each galaxyDatatypes as datatype}
+																		<option value={datatype}>{datatype}</option>
+																	{/each}
+																</select>
+															</div>
+															<div>
+																<label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+																<input
+																	type="text"
+																	value={output.description || ''}
+																	oninput={(e) => updateGalaxyOutput(index, 'description', e.currentTarget.value)}
+																	placeholder="Optional description"
+																	class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+																/>
+															</div>
+														</div>
+													</div>
+												{/each}
+											</div>
+											<p class="text-xs text-gray-500 mt-2">
+												Note: For complex outputs (collections), edit the downloaded XML manually.
+											</p>
+										</div>
+										
+										<!-- Command Section -->
+										<div class="mb-6">
+											<label class="block text-sm font-medium text-gray-700 mb-2">
+												Command Template *
+												{#if analysisState.metadata?.galaxyConfig?.command && !galaxyCommand}
+													<span class="text-gray-500 font-normal">(auto-detected from Dockerfile)</span>
+												{/if}
+											</label>
+											<input
+												type="text"
+												bind:value={galaxyCommand}
+												placeholder="python /src/run.py $input1 $param1"
+												class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+											/>
+											<p class="text-xs text-gray-500 mt-1">
+												Use $param_name for parameters and $input_name for data inputs.
+											</p>
+										</div>
+										
+										<!-- Container Section -->
+										<div class="mb-6">
+											<label class="block text-sm font-medium text-gray-700 mb-2">
+												Container Image
+												{#if analysisState.metadata?.galaxyConfig?.container && !galaxyContainer}
+													<span class="text-gray-500 font-normal">(auto-detected, can be overridden)</span>
+												{/if}
+											</label>
+											<input
+												type="text"
+												bind:value={galaxyContainer}
+												placeholder="ghcr.io/owner/repo:latest"
+												class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+											/>
+											<p class="text-xs text-gray-500 mt-1">
+												Docker container image location (e.g., ghcr.io/owner/repo:latest)
+											</p>
+										</div>
+									{/if}
 									
 									<!-- Export Actions -->
 									<div class="flex gap-3 mb-6">

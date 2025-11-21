@@ -1,6 +1,7 @@
 // Export format registry and management
 
 import { CodeMetaExporter } from './codemeta-exporter.js';
+import { GalaxyExporter } from './galaxy-exporter.js';
 import type { ExportFormat, MetadataExporter } from './base-exporter.js';
 
 // Export format registry
@@ -11,6 +12,13 @@ const exportFormats: ExportFormat[] = [
 		description: 'JSON-LD metadata following the CodeMeta standard for scientific software',
 		icon: '📄',
 		exporter: new CodeMetaExporter()
+	},
+	{
+		id: 'galaxy',
+		name: 'Galaxy',
+		description: 'Galaxy tool.xml format for tool integration',
+		icon: '🌌',
+		exporter: new GalaxyExporter()
 	}
 	// Future formats will be added here:
 	// {
