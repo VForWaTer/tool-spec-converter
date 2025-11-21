@@ -206,29 +206,57 @@ export function extractDockerfileCmd(dockerfileContent: string): { command: stri
 	// CMD can be in exec form: CMD ["executable","param1","param2"]
 	// or shell form: CMD executable param1 param2
 	if (cmdLine.startsWith('CMD ["') || cmdLine.startsWith('ENTRYPOINT ["')) {
-		// Exec form - extract JSON array
-		const match = cmdLine.match(/\["([^"]+)",?\s*(.*)\]/);
-		if (match) {
-			const executable = match[1];
-			const rest = match[2] ? match[2].replace(/"/g, '').trim() : '';
-			
-			// Detect interpreter
-			let interpreter: string | undefined;
-			if (executable.includes('python')) {
-				interpreter = 'python';
-			} else if (executable.includes('perl')) {
-				interpreter = 'perl';
-			} else if (executable.includes('Rscript')) {
-				interpreter = 'R';
-			} else if (executable.includes('matlab')) {
-				interpreter = 'matlab';
-			} else if (executable.includes('bash') || executable.includes('sh')) {
-				interpreter = 'bash';
+		// Exec form - extract JSON array substring and parse it
+		const arrayMatch = cmdLine.match(/\[.*\]/);
+		if (arrayMatch) {
+			try {
+				const args = JSON.parse(arrayMatch[0]);
+				if (Array.isArray(args) && args.length > 0) {
+					const executable = args[0];
+					const command = args.join(' ');
+					
+					// Detect interpreter from first element
+					let interpreter: string | undefined;
+					if (executable.includes('python')) {
+						interpreter = 'python';
+					} else if (executable.includes('perl')) {
+						interpreter = 'perl';
+					} else if (executable.includes('Rscript')) {
+						interpreter = 'R';
+					} else if (executable.includes('matlab')) {
+						interpreter = 'matlab';
+					} else if (executable.includes('bash') || executable.includes('sh')) {
+						interpreter = 'bash';
+					}
+					
+					return { command, interpreter };
+				}
+			} catch (parseError) {
+				// JSON.parse failed, fall back to original regex logic
+				const match = cmdLine.match(/\["([^"]+)",?\s*(.*)\]/);
+				if (match) {
+					const executable = match[1];
+					const rest = match[2] ? match[2].replace(/"/g, '').trim() : '';
+					
+					// Detect interpreter
+					let interpreter: string | undefined;
+					if (executable.includes('python')) {
+						interpreter = 'python';
+					} else if (executable.includes('perl')) {
+						interpreter = 'perl';
+					} else if (executable.includes('Rscript')) {
+						interpreter = 'R';
+					} else if (executable.includes('matlab')) {
+						interpreter = 'matlab';
+					} else if (executable.includes('bash') || executable.includes('sh')) {
+						interpreter = 'bash';
+					}
+					
+					// Reconstruct command for Galaxy (simplified - user may need to adjust)
+					const command = rest ? `${executable} ${rest}` : executable;
+					return { command, interpreter };
+				}
 			}
-			
-			// Reconstruct command for Galaxy (simplified - user may need to adjust)
-			const command = rest ? `${executable} ${rest}` : executable;
-			return { command, interpreter };
 		}
 	} else {
 		// Shell form - extract command
