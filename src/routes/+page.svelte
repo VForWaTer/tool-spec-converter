@@ -3,7 +3,8 @@
 	import { analysisStore, startAnalysis, cancelAnalysis, resetAnalysis } from '$lib/analysis-engine.js';
 	import type { AnalysisState } from '$lib/types.js';
 	import { getExportFormats, getDefaultExportFormat } from '$lib/exporters/export-registry.js';
-	import type { UnifiedSoftwareMetadata, GalaxyOutput, GalaxyExportConfig } from '$lib/unified-metadata.js';
+	import type { UnifiedSoftwareMetadata, GalaxyOutput, GalaxyExportConfig, Author } from '$lib/unified-metadata.js';
+	import type { DoapConfig } from '$lib/exporters/doap-exporter.js';
 	
 	let searchValue = $state('');
 	let isSearching = $state(false);
@@ -37,6 +38,10 @@
 	let galaxyContainer: string = $state('');
 	let galaxyContainerVersion: string = $state('');
 	
+	// DOAP-specific state
+	let doapMaintainer: Author | null = $state(null);
+	let doapOutputFormat: 'turtle' | 'rdfxml' = $state('turtle');
+	
 	// Subscribe to analysis store
 	analysisStore.subscribe(state => {
 		analysisState = state;
@@ -57,6 +62,22 @@
 			// Initialize container from repository if not set
 			if (!galaxyContainer && state.metadata?.repository?.fullName) {
 				galaxyContainer = `ghcr.io/${state.metadata.repository.fullName}:latest`;
+			}
+			
+			// Initialize DOAP maintainer from metadata or resolve from repository
+			if (state.metadata) {
+				if (state.metadata.doapConfig?.maintainer) {
+					doapMaintainer = state.metadata.doapConfig.maintainer;
+				} else if (state.metadata.repository?.fullName) {
+					// Extract owner from fullName (owner/repo format)
+					const owner = state.metadata.repository.fullName.split('/')[0];
+					if (owner) {
+						doapMaintainer = { name: owner };
+					}
+				} else if (state.metadata.authors && state.metadata.authors.length > 0) {
+					// Use first author as fallback
+					doapMaintainer = state.metadata.authors[0];
+				}
 			}
 			
 			// Auto-collapse analysis after 2 seconds
@@ -137,6 +158,15 @@
 			if ('download' in format.exporter) {
 				(format.exporter as any).download(analysisState.metadata, undefined, galaxyConfig);
 			}
+		} else if (selectedExportFormat === 'doap') {
+			const doapConfig: DoapConfig = {
+				maintainer: doapMaintainer || undefined,
+				format: doapOutputFormat
+			};
+			
+			if ('download' in format.exporter) {
+				(format.exporter as any).download(analysisState.metadata, undefined, doapConfig);
+			}
 		} else {
 			if ('download' in format.exporter) {
 				(format.exporter as any).download(analysisState.metadata);
@@ -161,6 +191,16 @@
 			};
 			
 			return (format.exporter as any).export(analysisState.metadata, galaxyConfig);
+		}
+		
+		// For DOAP export, we need to pass the config
+		if (selectedExportFormat === 'doap') {
+			const doapConfig: DoapConfig = {
+				maintainer: doapMaintainer || undefined,
+				format: doapOutputFormat
+			};
+			
+			return (format.exporter as any).export(analysisState.metadata, doapConfig);
 		}
 		
 		return format.exporter.export(analysisState.metadata);
@@ -545,6 +585,88 @@
 											/>
 											<p class="text-xs text-gray-500 mt-1">
 												Docker container image location (e.g., ghcr.io/owner/repo:latest)
+											</p>
+										</div>
+									{/if}
+									
+									<!-- DOAP-specific inputs -->
+									{#if selectedExportFormat === 'doap'}
+										<!-- Maintainer Section -->
+										<div class="mb-6">
+											<label class="block text-sm font-medium text-gray-700 mb-2">
+												Maintainer (optional - will use repository owner or first author if not specified)
+											</label>
+											<div class="space-y-3">
+												<div>
+													<label class="block text-xs font-medium text-gray-600 mb-1">Name</label>
+													<input
+														type="text"
+														value={doapMaintainer?.name || ''}
+														oninput={(e) => doapMaintainer = { ...(doapMaintainer || {}), name: e.currentTarget.value } as Author}
+														placeholder="Full name or given/family names"
+														class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+													/>
+												</div>
+												<div class="grid grid-cols-2 gap-3">
+													<div>
+														<label class="block text-xs font-medium text-gray-600 mb-1">Given Names</label>
+														<input
+															type="text"
+															value={doapMaintainer?.givenNames || ''}
+															oninput={(e) => doapMaintainer = { ...(doapMaintainer || {}), givenNames: e.currentTarget.value } as Author}
+															placeholder="First name"
+															class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+														/>
+													</div>
+													<div>
+														<label class="block text-xs font-medium text-gray-600 mb-1">Family Names</label>
+														<input
+															type="text"
+															value={doapMaintainer?.familyNames || ''}
+															oninput={(e) => doapMaintainer = { ...(doapMaintainer || {}), familyNames: e.currentTarget.value } as Author}
+															placeholder="Last name"
+															class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+														/>
+													</div>
+												</div>
+												<div>
+													<label class="block text-xs font-medium text-gray-600 mb-1">Email</label>
+													<input
+														type="email"
+														value={doapMaintainer?.email || ''}
+														oninput={(e) => doapMaintainer = { ...(doapMaintainer || {}), email: e.currentTarget.value } as Author}
+														placeholder="maintainer@example.com"
+														class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+													/>
+												</div>
+												<div>
+													<label class="block text-xs font-medium text-gray-600 mb-1">ORCID</label>
+													<input
+														type="text"
+														value={doapMaintainer?.orcid || ''}
+														oninput={(e) => doapMaintainer = { ...(doapMaintainer || {}), orcid: e.currentTarget.value } as Author}
+														placeholder="0000-0000-0000-0000"
+														class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+													/>
+												</div>
+											</div>
+											<p class="text-xs text-gray-500 mt-2">
+												If left empty, the maintainer will be automatically resolved from the repository owner or first author.
+											</p>
+										</div>
+										
+										<!-- Output Format Section -->
+										<div class="mb-6">
+											<label class="block text-sm font-medium text-gray-700 mb-2">Output Format</label>
+											<select
+												bind:value={doapOutputFormat}
+												class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+											>
+												<option value="turtle">Turtle (TTL) - Human-readable</option>
+												<option value="rdfxml">RDF/XML - Widely supported</option>
+											</select>
+											<p class="text-xs text-gray-500 mt-1">
+												Choose the RDF serialization format for the DOAP export.
 											</p>
 										</div>
 									{/if}

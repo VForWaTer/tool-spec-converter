@@ -26,6 +26,7 @@
 	"dependencies": {
 		"@citation-js/core": "^0.7.18",
 		"@citation-js/plugin-cff": "^0.6.1",
-		"js-yaml": "^4.1.0"
+		"js-yaml": "^4.1.0",
+		"n3": "^1.21.0"
 	}
 }

@@ -2,6 +2,7 @@
 
 import { CodeMetaExporter } from './codemeta-exporter.js';
 import { GalaxyExporter } from './galaxy-exporter.js';
+import { DoapExporter } from './doap-exporter.js';
 import type { ExportFormat, MetadataExporter } from './base-exporter.js';
 
 // Export format registry
@@ -19,6 +20,13 @@ const exportFormats: ExportFormat[] = [
 		description: 'Galaxy tool.xml format for tool integration',
 		icon: '🌌',
 		exporter: new GalaxyExporter()
+	},
+	{
+		id: 'doap',
+		name: 'DOAP',
+		description: 'RDF vocabulary for describing software projects (Description of a Project)',
+		icon: '📋',
+		exporter: new DoapExporter()
 	}
 	// Future formats will be added here:
 	// {

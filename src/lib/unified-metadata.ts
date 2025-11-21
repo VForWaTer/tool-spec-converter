@@ -121,6 +121,11 @@ export interface UnifiedSoftwareMetadata {
 	
 	// Galaxy-specific configuration (optional)
 	galaxyConfig?: GalaxyExportConfig;
+	
+	// DOAP-specific configuration (optional)
+	doapConfig?: {
+		maintainer?: Author;
+	};
 }
 
 /**
@@ -217,6 +222,22 @@ export function createUnifiedMetadata(
 			containerVersion: repositoryVersion,
 			outputs: [],
 			profile: '24.0'
+		},
+		
+		// DOAP-specific configuration (initialized with resolved maintainer)
+		doapConfig: {
+			maintainer: (() => {
+				// Priority: repository owner → first author
+				if (repoInfo?.owner) {
+					return {
+						name: repoInfo.owner
+					};
+				}
+				if (authors.length > 0) {
+					return authors[0];
+				}
+				return undefined;
+			})()
 		}
 	};
 	
