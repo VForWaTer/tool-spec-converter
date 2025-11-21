@@ -290,11 +290,11 @@ export class CwlExporter extends BaseExporter {
 		const commands: string[] = [];
 		
 		// Step 1: Generate inputs.json from CWL inputs
-		// We'll use a Python script that reads CWL input values
+		// CWL stages the inputs directory before execution, so no mkdir needed
 		if (data.toolSpec.parameters && Object.keys(data.toolSpec.parameters).length > 0) {
 			commands.push(this.generateInputsJsonCommand(data));
 		} else {
-			commands.push('mkdir -p inputs && echo "{}" > inputs/inputs.json');
+			commands.push('echo "{}" > inputs/inputs.json');
 		}
 		
 		// Step 2: Run docker with proper mountpoints and RUN_TOOL
@@ -307,10 +307,11 @@ export class CwlExporter extends BaseExporter {
 	 * Generate command to create inputs.json from CWL inputs
 	 * Uses shell echo/printf to construct JSON directly (no Python required)
 	 * CWL will evaluate $(inputs.xxx) expressions before the command runs
+	 * Note: CWL stages the inputs directory before execution, so no mkdir needed
 	 */
 	private generateInputsJsonCommand(data: UnifiedSoftwareMetadata): string {
 		if (!data.toolSpec.parameters || Object.keys(data.toolSpec.parameters).length === 0) {
-			return 'mkdir -p inputs && echo "{}" > inputs/inputs.json';
+			return 'echo "{}" > inputs/inputs.json';
 		}
 		
 		// Build JSON entries using shell
@@ -337,19 +338,22 @@ export class CwlExporter extends BaseExporter {
 			}
 		}
 		
-		// Use echo/printf to create JSON file
+		// Use printf to create JSON file
 		// CWL expressions will be substituted before this runs
-		return `mkdir -p inputs && printf '{\n${jsonEntries.join(',\n')}\n}' > inputs/inputs.json`;
+		// CWL stages the inputs directory, so no mkdir needed
+		return `printf '{\n${jsonEntries.join(',\n')}\n}' > inputs/inputs.json`;
 	}
 	
 	/**
 	 * Generate InitialWorkDirRequirement listing to create inputs directory
+	 * Returns a valid CWL Directory entry conforming to the CWL spec
 	 */
 	private generateInputsJsonListing(data: UnifiedSoftwareMetadata): any[] {
 		return [
 			{
-				entry: 'inputs',
-				entryname: 'inputs',
+				class: 'Directory',
+				basename: 'inputs',
+				listing: [],
 				writable: true
 			}
 		];
